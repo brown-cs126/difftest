@@ -1,0 +1,9 @@
+(executable
+ (name difftest)
+ (modules difftest)
+ (libraries yojson csci1260))
+
+(rule
+ (alias  runtest)
+ (deps difftest.exe (glob_files ../examples/*.lisp))
+ (action (run ./difftest.exe)))
