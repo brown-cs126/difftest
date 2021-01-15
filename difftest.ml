@@ -8,6 +8,8 @@ type diffresult =
   ; interpreter: (string, string) result
   ; compiler: (string, string) result }
 
+type partial_success = {interpreter_agrees: bool; compiler_agrees: bool}
+
 let print_outputs {expected; interpreter; compiler} : string =
   let print_outputs (outputs : (string * string) list) : string =
     outputs
@@ -33,26 +35,32 @@ let print_outputs {expected; interpreter; compiler} : string =
   in
   print_outputs (expected @ [interpreter] @ [compiler])
 
+let outputs_agree expected actual =
+  match (expected, actual) with
+  | Ok expected, Ok actual ->
+      String.equal expected actual
+  | Error _, Error _ ->
+      true
+  | Ok _, Error _ | Error _, Ok _ ->
+      false
+
 let result_of_diffresult diffresult =
-  let ok =
+  let ok, partial_success =
     match diffresult with
-    | { expected= Some (Ok expected)
-      ; interpreter= Ok interpreter
-      ; compiler= Ok compiler } ->
-        let interpreter_agrees = String.equal expected interpreter
-        and compiler_agrees = String.equal expected compiler in
-        interpreter_agrees && compiler_agrees
-    | {expected= Some (Error _); interpreter= Error _; compiler= Error _} ->
-        true
+    | {expected= Some expected; interpreter; compiler} ->
+        let interpreter_agrees = outputs_agree expected interpreter
+        and compiler_agrees = outputs_agree expected compiler in
+        ( interpreter_agrees && compiler_agrees
+        , Some {interpreter_agrees; compiler_agrees} )
     | {expected= None; interpreter= Ok interpreter; compiler= Ok compiler} ->
-        String.equal interpreter compiler
-    | {expected= _; interpreter= _; compiler= _} ->
-        false
+        (String.equal interpreter compiler, None)
+    | {expected= None; interpreter= _; compiler= _} ->
+        (false, None)
   in
   let summary = print_outputs diffresult in
-  if ok then Ok summary else Error summary
+  if ok then Ok summary else Error (summary, partial_success)
 
-let diff example : (string, string) result =
+let diff example : (string, string * partial_success option) result =
   let read_file file =
     let ch = open_in file in
     let s = really_input_string ch (in_channel_length ch) in
@@ -96,7 +104,7 @@ let difftest () =
   results
   |> List.iter (fun (filename, result) ->
          match result with
-         | Error summary ->
+         | Error (summary, _) ->
              printf "Test failed: %s\n%s\n\n" filename summary
          | Ok _ ->
              ()) ;
@@ -115,8 +123,17 @@ let difftest_json () =
            match result with
            | Ok summary ->
                [("result", `String "passed"); ("summary", `String summary)]
-           | Error summary ->
+           | Error (summary, partial_success) ->
+               let partial_success =
+                 match partial_success with
+                 | None ->
+                     []
+                 | Some {interpreter_agrees; compiler_agrees} ->
+                     [ ("interpreter_agrees", `Bool interpreter_agrees)
+                     ; ("compiler_agrees", `Bool compiler_agrees) ]
+               in
                [("result", `String "failed"); ("summary", `String summary)]
+               @ partial_success
          in
          `Assoc (("example", `String example) :: details))
   |> fun elts -> `List elts
