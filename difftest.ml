@@ -1,3 +1,4 @@
+open Asm
 open Csci1260
 open Printf
 open Yojson
@@ -51,7 +52,7 @@ let result_of_diffresult diffresult =
   let summary = print_outputs diffresult in
   if ok then Ok summary else Error summary
 
-let diff (lang : Lang.language) example : (string, string) result =
+let diff example : (string, string) result =
   let read_file file =
     let ch = open_in file in
     let s = really_input_string ch (in_channel_length ch) in
@@ -70,32 +71,29 @@ let diff (lang : Lang.language) example : (string, string) result =
     | true, true ->
         failwith (sprintf "Expected output and error for test: %s" example)
   in
-  let ast = Parser.parse_file example in
+  let ast = S_exp.parse_file example in
   let try_run f =
     try Ok (f ast) with
-    | Ast.Stuck _ as e ->
-        Error (Ast.print_stuck e)
     | e ->
         Error (Printexc.to_string e)
   in
-  let interpreter = try_run lang.interpreter
+  let interpreter = try_run Interp.interp
   and compiler =
     try_run (fun ast ->
         let filename = Filename.basename example in
-        let instrs = lang.compiler ast in
-        Assemble.eval "test_output" lang.runtime filename [] instrs)
+        let instrs = Compile.compile ast in
+        Assemble.eval "test_output" Runtime.runtime filename [] instrs)
   in
   result_of_diffresult {expected; interpreter; compiler}
 
-let results lang =
+let results =
   Sys.readdir "../examples" |> Array.to_list
   |> List.filter (fun file -> Filename.check_suffix file ".lisp")
   |> List.map (sprintf "examples/%s")
-  |> List.map (fun f -> (f, diff lang (sprintf "../%s" f)))
+  |> List.map (fun f -> (f, diff (sprintf "../%s" f)))
 
-let difftest (lang : Lang.language) =
-  printf "TESTING %s\n" lang.name ;
-  let results = results lang in
+let difftest () =
+  printf "TESTING\n" ;
   results
   |> List.iter (fun (filename, result) ->
          match result with
@@ -111,8 +109,8 @@ let difftest (lang : Lang.language) =
   if failed_tests = 0 then printf "PASSED %d tests\n" num_tests
   else printf "FAILED %d/%d tests\n" failed_tests num_tests
 
-let difftest_json (lang : Lang.language) =
-  results lang
+let difftest_json () =
+  results 
   |> List.map (fun (example, result) ->
          let details =
            match result with
@@ -127,9 +125,6 @@ let difftest_json (lang : Lang.language) =
 let () =
   match Sys.getenv_opt "DIFFTEST_OUTPUT" with
   | Some "json" ->
-      Lang.languages
-      |> List.map (fun (lang : Lang.language) ->
-             (lang.name, difftest_json lang))
-      |> fun results -> `Assoc results |> Yojson.to_string |> printf "%s"
+       difftest_json () |> Yojson.to_string |> printf "%s"
   | _ ->
-      Lang.languages |> List.iter difftest
+      difftest ()
