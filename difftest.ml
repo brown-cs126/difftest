@@ -56,7 +56,10 @@ let diff example : (string, string) result =
   let read_file file =
     let ch = open_in file in
     let s = really_input_string ch (in_channel_length ch) in
-    close_in ch ; s
+    close_in ch ;
+    let n = String.length s in
+    (* trim trailing newline if present *)
+    if n > 0 && s.[n - 1] = '\n' then String.sub s 0 (n - 1) else s
   in
   let expected =
     let example = Filename.remove_extension example in
@@ -72,11 +75,7 @@ let diff example : (string, string) result =
         failwith (sprintf "Expected output and error for test: %s" example)
   in
   let ast = S_exp.parse_file example in
-  let try_run f =
-    try Ok (f ast) with
-    | e ->
-        Error (Printexc.to_string e)
-  in
+  let try_run f = try Ok (f ast) with e -> Error (Printexc.to_string e) in
   let interpreter = try_run Interp.interp
   and compiler =
     try_run (fun ast ->
@@ -110,7 +109,7 @@ let difftest () =
   else printf "FAILED %d/%d tests\n" failed_tests num_tests
 
 let difftest_json () =
-  results 
+  results
   |> List.map (fun (example, result) ->
          let details =
            match result with
@@ -125,6 +124,6 @@ let difftest_json () =
 let () =
   match Sys.getenv_opt "DIFFTEST_OUTPUT" with
   | Some "json" ->
-       difftest_json () |> Yojson.to_string |> printf "%s"
+      difftest_json () |> Yojson.to_string |> printf "%s"
   | _ ->
       difftest ()
