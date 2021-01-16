@@ -16,29 +16,23 @@ let indent s =
   |> String.concat "\n"
 
 let print_outputs {expected; interpreter; compiler} : string =
-  let print_outputs (outputs : (string * string) list) : string =
+  let print_outputs (outputs : (string * (string, string) result) list) =
     outputs
     |> List.map (fun (source, output) ->
-           sprintf "%s output:\n\n" source ^ indent output)
+           let descriptor, output =
+             match output with
+             | Ok output ->
+                 ("output", output)
+             | Error error ->
+                 ("error", error)
+           in
+           sprintf "%s %s:\n\n%s" source descriptor (indent output))
     |> String.concat "\n\n"
   and expected =
-    match expected with
-    | Some (Ok output) ->
-        [("Expected", output)]
-    | Some (Error reason) ->
-        [ ( "Expected"
-          , "ERROR"
-            ^ if String.length reason > 0 then sprintf ": %s" reason else "" )
-        ]
-    | None ->
-        []
-  and interpreter =
-    ( "Interpreter"
-    , match interpreter with Ok output -> output | Error err -> err )
-  and compiler =
-    ("Compiler", match compiler with Ok output -> output | Error err -> err)
+    match expected with Some expected -> [("Expected", expected)] | None -> []
   in
-  print_outputs (expected @ [interpreter] @ [compiler])
+  print_outputs
+    (expected @ [("Interpreter", interpreter); ("Compiler", compiler)])
 
 let outputs_agree expected actual =
   match (expected, actual) with
@@ -74,6 +68,7 @@ let diff example : (string, string * partial_success option) result =
     (* trim trailing newline if present *)
     if n > 0 && s.[n - 1] = '\n' then String.sub s 0 (n - 1) else s
   in
+  let filename = Filename.basename example in
   let expected =
     let example = Filename.remove_extension example in
     let out_file = example ^ ".out" and err_file = example ^ ".err" in
@@ -81,18 +76,22 @@ let diff example : (string, string * partial_success option) result =
     | false, false ->
         None
     | false, true ->
-        Some (Error (read_file err_file))
+        let reason = read_file err_file in
+        let description =
+          "ERROR"
+          ^ if String.length reason > 0 then sprintf ": %s" reason else ""
+        in
+        Some (Error description)
     | true, false ->
         Some (Ok (read_file out_file))
     | true, true ->
-        failwith (sprintf "Expected output and error for test: %s" example)
+        failwith (sprintf "Expected output and error for test: %s" filename)
   in
   let ast = S_exp.parse_file example in
   let try_run f = try Ok (f ast) with e -> Error (Printexc.to_string e) in
   let interpreter = try_run Interp.interp
   and compiler =
     try_run (fun ast ->
-        let filename = Filename.basename example in
         let instrs = Compile.compile ast in
         Assemble.eval "test_output" Runtime.runtime filename [] instrs)
   in
