@@ -10,12 +10,17 @@ type diffresult =
 
 type partial_success = {interpreter_agrees: bool; compiler_agrees: bool}
 
+let indent s =
+  String.split_on_char '\n' s
+  |> List.map (fun s -> "\t" ^ s)
+  |> String.concat "\n"
+
 let print_outputs {expected; interpreter; compiler} : string =
   let print_outputs (outputs : (string * string) list) : string =
     outputs
     |> List.map (fun (source, output) ->
-           sprintf "%s output:\n\n" source ^ sprintf "\t%s\n" output)
-    |> String.concat "\n"
+           sprintf "%s output:\n\n" source ^ indent output)
+    |> String.concat "\n\n"
   and expected =
     match expected with
     | Some (Ok output) ->
