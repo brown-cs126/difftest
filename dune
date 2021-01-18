@@ -4,6 +4,11 @@
  (libraries yojson csci1260))
 
 (rule
- (alias  runtest)
- (deps difftest.exe (glob_files ../examples/*.lisp) (glob_files ../examples/*.out) (glob_files ../examples/*.err))
- (action (run ./difftest.exe)))
+ (alias runtest)
+ (deps
+  difftest.exe
+  (glob_files ../examples/*.lisp)
+  (glob_files ../examples/*.out)
+  (glob_files ../examples/*.err))
+ (action
+  (run ./difftest.exe)))
