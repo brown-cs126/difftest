@@ -87,8 +87,13 @@ let diff example : (string, string * partial_success option) result =
     | true, true ->
         failwith (sprintf "Expected output and error for test: %s" filename)
   in
-  let ast = S_exp.parse_file example in
-  let try_run f = try Ok (f ast) with e -> Error (Printexc.to_string e) in
+  let ast =
+    try Ok (S_exp.parse_file example) with e -> Error (Printexc.to_string e)
+  in
+  let try_run f =
+    Result.bind ast (fun ast ->
+        try Ok (f ast) with e -> Error (Printexc.to_string e))
+  in
   let interpreter = try_run Interp.interp
   and compiler =
     try_run (fun ast ->
