@@ -59,15 +59,28 @@ let result_of_diffresult diffresult =
   let summary = print_outputs diffresult in
   if ok then Ok summary else Error (summary, partial_success)
 
-let diff example : (string, string * partial_success option) result =
-  let read_file file =
-    let ch = open_in file in
-    let s = really_input_string ch (in_channel_length ch) in
-    close_in ch ;
-    let n = String.length s in
-    (* trim trailing newline if present *)
-    if n > 0 && s.[n - 1] = '\n' then String.sub s 0 (n - 1) else s
+let diff filename example expected =
+  let ast =
+    try Ok (S_exp.parse example) with e -> Error (Printexc.to_string e)
   in
+  let try_run f =
+    Result.bind ast (fun ast ->
+        try Ok (f ast) with e -> Error (Printexc.to_string e))
+  in
+  let interpreter = try_run Interp.interp
+  and compiler =
+    try_run (fun ast ->
+        let instrs = Compile.compile ast in
+        Assemble.eval "test_output" Runtime.runtime filename [] instrs)
+  in
+  result_of_diffresult {expected; interpreter; compiler}
+
+let read_file file =
+  let ch = open_in file in
+  let s = really_input_string ch (in_channel_length ch) in
+  close_in ch ; String.trim s
+
+let diff_file example : (string, string * partial_success option) result =
   let filename = Filename.basename example in
   let expected =
     let example = Filename.remove_extension example in
@@ -87,26 +100,29 @@ let diff example : (string, string * partial_success option) result =
     | true, true ->
         failwith (sprintf "Expected output and error for test: %s" filename)
   in
-  let ast =
-    try Ok (S_exp.parse_file example) with e -> Error (Printexc.to_string e)
-  in
-  let try_run f =
-    Result.bind ast (fun ast ->
-        try Ok (f ast) with e -> Error (Printexc.to_string e))
-  in
-  let interpreter = try_run Interp.interp
-  and compiler =
-    try_run (fun ast ->
-        let instrs = Compile.compile ast in
-        Assemble.eval "test_output" Runtime.runtime filename [] instrs)
-  in
-  result_of_diffresult {expected; interpreter; compiler}
+  diff filename (read_file example) expected
 
-let results =
+let csv_results =
+  (try read_file "../examples/examples.csv" with _ -> "")
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.length line != 0)
+  |> List.map (String.split_on_char ',')
+  |> List.map (List.map String.trim)
+  |> List.map (function
+       | [name; input; expected] ->
+           (name, diff name input (Some (Ok expected)))
+       | [name; input] ->
+           (name, diff name input None)
+       | _ ->
+           failwith "invalid 'examples.csv' format")
+
+let file_results =
   Sys.readdir "../examples" |> Array.to_list
   |> List.filter (fun file -> Filename.check_suffix file ".lisp")
   |> List.map (sprintf "examples/%s")
-  |> List.map (fun f -> (f, diff (sprintf "../%s" f)))
+  |> List.map (fun f -> (f, diff_file (sprintf "../%s" f)))
+
+let results = file_results @ csv_results
 
 let difftest () =
   printf "TESTING\n" ;
