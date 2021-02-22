@@ -3,8 +3,6 @@ open Csci1260
 open Printf
 open Yojson
 
-type test = Named of string | Anonymous
-
 type diffresult =
   { program: string
   ; expected: (string, string) result option
@@ -114,19 +112,21 @@ let csv_results =
   |> List.filter (fun line -> String.length line != 0)
   |> List.map (String.split_on_char ',')
   |> List.map (List.map String.trim)
-  |> List.map (function
-       | [program; expected] ->
-           (Anonymous, diff program (Some (Ok expected)))
-       | [program] ->
-           (Anonymous, diff program None)
-       | _ ->
-           failwith "invalid 'examples.csv' format")
+  |> List.mapi (fun i ->
+         let name = sprintf "anonymous-%s" (string_of_int i) in
+         function
+         | [program; expected] ->
+             (name, diff program (Some (Ok expected)))
+         | [program] ->
+             (name, diff program None)
+         | _ ->
+             failwith "invalid 'examples.csv' format")
 
 let file_results =
   Sys.readdir "../examples" |> Array.to_list
   |> List.filter (fun file -> Filename.check_suffix file ".lisp")
   |> List.map (sprintf "examples/%s")
-  |> List.map (fun f -> (Named f, diff_file (sprintf "../%s" f)))
+  |> List.map (fun f -> (f, diff_file (sprintf "../%s" f)))
 
 let results = file_results @ csv_results
 
@@ -134,10 +134,8 @@ let difftest () =
   printf "TESTING\n" ;
   results
   |> List.iter (function
-       | Named filename, Error (summary, _) ->
-           printf "Test failed: %s\n%s\n\n" filename summary
-       | Anonymous, Error (summary, _) ->
-           printf "Anonymous test failed:\n%s\n\n" summary
+       | name, Error (summary, _) ->
+           printf "Test failed: %s\n%s\n\n" name summary
        | _, Ok _ ->
            ()) ;
   let num_tests = List.length results in
@@ -149,15 +147,9 @@ let difftest () =
   else printf "FAILED %d/%d tests\n" failed_tests num_tests
 
 let difftest_json () =
-  List.mapi
-    (fun i (test, result) ->
-      let name =
-        match test with
-        | Named name ->
-            name
-        | Anonymous ->
-            sprintf "anonymous-%s" (string_of_int i)
-      and result, summary, misc =
+  List.map
+    (fun (name, result) ->
+      let result, summary, misc =
         match result with
         | Ok summary ->
             ("passed", summary, [])
