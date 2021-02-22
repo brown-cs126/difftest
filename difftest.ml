@@ -3,8 +3,11 @@ open Csci1260
 open Printf
 open Yojson
 
+type test = Named of string | Anonymous
+
 type diffresult =
-  { expected: (string, string) result option
+  { program: string
+  ; expected: (string, string) result option
   ; interpreter: (string, string) result
   ; compiler: (string, string) result }
 
@@ -15,8 +18,8 @@ let indent s =
   |> List.map (fun s -> "\t" ^ s)
   |> String.concat "\n"
 
-let print_outputs {expected; interpreter; compiler} : string =
-  let print_outputs (outputs : (string * (string, string) result) list) =
+let display_diffresult {program; expected; interpreter; compiler} : string =
+  let display_outputs outputs =
     outputs
     |> List.map (fun (source, output) ->
            let descriptor, output =
@@ -30,9 +33,9 @@ let print_outputs {expected; interpreter; compiler} : string =
     |> String.concat "\n\n"
   and expected =
     match expected with Some expected -> [("Expected", expected)] | None -> []
-  in
-  print_outputs
-    (expected @ [("Interpreter", interpreter); ("Compiler", compiler)])
+  and actual = [("Interpreter", interpreter); ("Compiler", compiler)] in
+  sprintf "Program:\n\n%s\n\n" (indent program)
+  ^ display_outputs (expected @ actual)
 
 let outputs_agree expected actual =
   match (expected, actual) with
@@ -46,22 +49,25 @@ let outputs_agree expected actual =
 let result_of_diffresult diffresult =
   let ok, partial_success =
     match diffresult with
-    | {expected= Some expected; interpreter; compiler} ->
+    | {program= _; expected= Some expected; interpreter; compiler} ->
         let interpreter_agrees = outputs_agree expected interpreter
         and compiler_agrees = outputs_agree expected compiler in
         ( interpreter_agrees && compiler_agrees
         , Some {interpreter_agrees; compiler_agrees} )
-    | {expected= None; interpreter= Ok interpreter; compiler= Ok compiler} ->
+    | { program= _
+      ; expected= None
+      ; interpreter= Ok interpreter
+      ; compiler= Ok compiler } ->
         (String.equal interpreter compiler, None)
-    | {expected= None; interpreter= _; compiler= _} ->
+    | {program= _; expected= None; interpreter= _; compiler= _} ->
         (false, None)
   in
-  let summary = print_outputs diffresult in
+  let summary = display_diffresult diffresult in
   if ok then Ok summary else Error (summary, partial_success)
 
-let diff filename example expected =
+let diff program expected =
   let ast =
-    try Ok (S_exp.parse example) with e -> Error (Printexc.to_string e)
+    try Ok (S_exp.parse program) with e -> Error (Printexc.to_string e)
   in
   let try_run f =
     Result.bind ast (fun ast ->
@@ -71,20 +77,20 @@ let diff filename example expected =
   and compiler =
     try_run (fun ast ->
         let instrs = Compile.compile ast in
-        Assemble.eval "test_output" Runtime.runtime filename [] instrs)
+        Assemble.eval "test_output" Runtime.runtime "test" [] instrs)
   in
-  result_of_diffresult {expected; interpreter; compiler}
+  result_of_diffresult {program; expected; interpreter; compiler}
 
 let read_file file =
   let ch = open_in file in
   let s = really_input_string ch (in_channel_length ch) in
   close_in ch ; String.trim s
 
-let diff_file example : (string, string * partial_success option) result =
-  let filename = Filename.basename example in
+let diff_file path =
+  let filename = Filename.basename path in
   let expected =
-    let example = Filename.remove_extension example in
-    let out_file = example ^ ".out" and err_file = example ^ ".err" in
+    let name = Filename.remove_extension path in
+    let out_file = name ^ ".out" and err_file = name ^ ".err" in
     match (Sys.file_exists out_file, Sys.file_exists err_file) with
     | false, false ->
         None
@@ -100,7 +106,7 @@ let diff_file example : (string, string * partial_success option) result =
     | true, true ->
         failwith (sprintf "Expected output and error for test: %s" filename)
   in
-  diff filename (read_file example) expected
+  diff (read_file path) expected
 
 let csv_results =
   (try read_file "../examples/examples.csv" with _ -> "")
@@ -109,10 +115,10 @@ let csv_results =
   |> List.map (String.split_on_char ',')
   |> List.map (List.map String.trim)
   |> List.map (function
-       | [name; input; expected] ->
-           (name, diff name input (Some (Ok expected)))
-       | [name; input] ->
-           (name, diff name input None)
+       | [program; expected] ->
+           (Anonymous, diff program (Some (Ok expected)))
+       | [program] ->
+           (Anonymous, diff program None)
        | _ ->
            failwith "invalid 'examples.csv' format")
 
@@ -120,19 +126,20 @@ let file_results =
   Sys.readdir "../examples" |> Array.to_list
   |> List.filter (fun file -> Filename.check_suffix file ".lisp")
   |> List.map (sprintf "examples/%s")
-  |> List.map (fun f -> (f, diff_file (sprintf "../%s" f)))
+  |> List.map (fun f -> (Named f, diff_file (sprintf "../%s" f)))
 
 let results = file_results @ csv_results
 
 let difftest () =
   printf "TESTING\n" ;
   results
-  |> List.iter (fun (filename, result) ->
-         match result with
-         | Error (summary, _) ->
-             printf "Test failed: %s\n%s\n\n" filename summary
-         | Ok _ ->
-             ()) ;
+  |> List.iter (function
+       | Named filename, Error (summary, _) ->
+           printf "Test failed: %s\n%s\n\n" filename summary
+       | Anonymous, Error (summary, _) ->
+           printf "Anonymous test failed:\n%s\n\n" summary
+       | _, Ok _ ->
+           ()) ;
   let num_tests = List.length results in
   let count f l =
     List.fold_left (fun count x -> if f x then 1 + count else count) 0 l
@@ -142,25 +149,36 @@ let difftest () =
   else printf "FAILED %d/%d tests\n" failed_tests num_tests
 
 let difftest_json () =
-  results
-  |> List.map (fun (example, result) ->
-         let details =
-           match result with
-           | Ok summary ->
-               [("result", `String "passed"); ("summary", `String summary)]
-           | Error (summary, partial_success) ->
-               let partial_success =
-                 match partial_success with
-                 | None ->
-                     []
-                 | Some {interpreter_agrees; compiler_agrees} ->
-                     [ ("interpreter_agrees", `Bool interpreter_agrees)
-                     ; ("compiler_agrees", `Bool compiler_agrees) ]
-               in
-               [("result", `String "failed"); ("summary", `String summary)]
-               @ partial_success
-         in
-         `Assoc (("example", `String example) :: details))
+  List.mapi
+    (fun i (test, result) ->
+      let name, anonymous =
+        match test with
+        | Named name ->
+            (name, false)
+        | Anonymous ->
+            (sprintf "anonymous-%s" (string_of_int i), true)
+      and result, summary, misc =
+        match result with
+        | Ok summary ->
+            ("passed", summary, [])
+        | Error (summary, partial_success) ->
+            let partial_success =
+              match partial_success with
+              | Some {interpreter_agrees; compiler_agrees} ->
+                  [ ("interpreter_agrees", `Bool interpreter_agrees)
+                  ; ("compiler_agrees", `Bool compiler_agrees) ]
+              | None ->
+                  []
+            in
+            ("failed", summary, partial_success)
+      in
+      [ ("example", `String name)
+      ; ("anonymous", `Bool anonymous)
+      ; ("result", `String result)
+      ; ("summary", `String summary) ]
+      @ misc)
+    results
+  |> List.map (fun results -> `Assoc results)
   |> fun elts -> `List elts
 
 let () =
