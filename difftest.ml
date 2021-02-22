@@ -151,12 +151,12 @@ let difftest () =
 let difftest_json () =
   List.mapi
     (fun i (test, result) ->
-      let name, anonymous =
+      let name =
         match test with
         | Named name ->
-            (name, false)
+            name
         | Anonymous ->
-            (sprintf "anonymous-%s" (string_of_int i), true)
+            sprintf "anonymous-%s" (string_of_int i)
       and result, summary, misc =
         match result with
         | Ok summary ->
@@ -173,7 +173,6 @@ let difftest_json () =
             ("failed", summary, partial_success)
       in
       [ ("example", `String name)
-      ; ("anonymous", `Bool anonymous)
       ; ("result", `String result)
       ; ("summary", `String summary) ]
       @ misc)
