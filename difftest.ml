@@ -7,7 +7,7 @@ type diffresult =
   { program: string
   ; expected: (string, string) result option
   ; interpreter: (string, string) result
-  ; compiler: (string, string) result }
+  ; compiler: (string, Assemble.error) result }
 
 type partial_success = {interpreter_agrees: bool; compiler_agrees: bool}
 
@@ -29,13 +29,19 @@ let display_diffresult {program; expected; interpreter; compiler} : string =
            in
            sprintf "%s %s:\n\n%s" source descriptor (indent output))
     |> String.concat "\n\n"
-  and expected =
+  and compiler =
+    Result.map_error
+      (function
+        | Assemble.Expected error -> error | Assemble.Unexpected error -> error)
+      compiler
+  in
+  let expected =
     match expected with Some expected -> [("Expected", expected)] | None -> []
   and actual = [("Interpreter", interpreter); ("Compiler", compiler)] in
   sprintf "Program:\n\n%s\n\n" (indent program)
   ^ display_outputs (expected @ actual)
 
-let outputs_agree expected actual =
+let interpreter_output_matches expected actual =
   match (expected, actual) with
   | Ok expected, Ok actual ->
       String.equal expected actual
@@ -44,12 +50,23 @@ let outputs_agree expected actual =
   | Ok _, Error _ | Error _, Ok _ ->
       false
 
+let compiler_output_matches expected actual =
+  match (expected, actual) with
+  | Ok expected, Ok actual ->
+      String.equal expected actual
+  | Error _, Error (Assemble.Expected _) ->
+      true
+  | Error _, Error (Assemble.Unexpected _) ->
+      false
+  | Ok _, Error _ | Error _, Ok _ ->
+      false
+
 let result_of_diffresult diffresult =
   let ok, partial_success =
     match diffresult with
     | {program= _; expected= Some expected; interpreter; compiler} ->
-        let interpreter_agrees = outputs_agree expected interpreter
-        and compiler_agrees = outputs_agree expected compiler in
+        let interpreter_agrees = interpreter_output_matches expected interpreter
+        and compiler_agrees = compiler_output_matches expected compiler in
         ( interpreter_agrees && compiler_agrees
         , Some {interpreter_agrees; compiler_agrees} )
     | { program= _
@@ -67,15 +84,19 @@ let diff program expected =
   let ast =
     try Ok (S_exp.parse program) with e -> Error (Printexc.to_string e)
   in
-  let try_run f =
-    Result.bind ast (fun ast ->
-        try Ok (f ast) with e -> Error (Printexc.to_string e))
+  let try_bind f arg =
+    Result.bind arg (fun arg ->
+        try f arg with e -> Error (Printexc.to_string e))
   in
-  let interpreter = try_run Interp.interp
+  let try_map f = try_bind (fun arg -> Ok (f arg)) in
+  let interpreter = try_map Interp.interp ast
   and compiler =
-    try_run (fun ast ->
-        let instrs = Compile.compile ast in
-        Assemble.eval "test_output" Runtime.runtime "test" [] instrs)
+    try_map Compile.compile ast
+    |> function
+    | Ok instrs ->
+        Assemble.eval "test_output" Runtime.runtime "test" [] instrs
+    | Error err ->
+        Error (Assemble.Expected err)
   in
   result_of_diffresult {program; expected; interpreter; compiler}
 
