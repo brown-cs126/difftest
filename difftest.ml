@@ -67,15 +67,15 @@ let diff program expected =
   let ast =
     try Ok (S_exp.parse program) with e -> Error (Printexc.to_string e)
   in
-  let try_run f =
-    Result.bind ast (fun ast ->
-        try Ok (f ast) with e -> Error (Printexc.to_string e))
+  let try_bind f arg =
+    Result.bind arg (fun arg ->
+        try f arg with e -> Error (Printexc.to_string e))
   in
-  let interpreter = try_run Interp.interp
+  let try_map f = try_bind (fun arg -> Ok (f arg)) in
+  let interpreter = try_map Interp.interp ast
   and compiler =
-    try_run (fun ast ->
-        let instrs = Compile.compile ast in
-        Assemble.eval "test_output" Runtime.runtime "test" [] instrs)
+    try_map Compile.compile ast
+    |> try_bind (Assemble.eval "test_output" Runtime.runtime "test" [])
   in
   result_of_diffresult {program; expected; interpreter; compiler}
 
