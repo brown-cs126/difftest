@@ -80,7 +80,7 @@ let result_of_diffresult diffresult =
   let summary = display_diffresult diffresult in
   if ok then Ok summary else Error (summary, partial_success)
 
-let diff program expected =
+let diff name program expected =
   let ast =
     try Ok (S_exp.parse program) with e -> Error (Printexc.to_string e)
   in
@@ -94,7 +94,7 @@ let diff program expected =
     try_map Compile.compile ast
     |> function
     | Ok instrs ->
-        Assemble.eval "test_output" Runtime.runtime "test" [] instrs
+        Assemble.eval "test_output" Runtime.runtime name [] instrs
     | Error err ->
         Error (Assemble.Expected err)
   in
@@ -125,7 +125,7 @@ let diff_file path =
     | true, true ->
         failwith (sprintf "Expected output and error for test: %s" filename)
   in
-  diff (read_file path) expected
+  diff filename (read_file path) expected
 
 let csv_results =
   (try read_file "../examples/examples.csv" with _ -> "")
@@ -137,9 +137,9 @@ let csv_results =
          let name = sprintf "anonymous-%s" (string_of_int i) in
          function
          | [program; expected] ->
-             (name, diff program (Some (Ok expected)))
+             (name, diff name program (Some (Ok expected)))
          | [program] ->
-             (name, diff program None)
+             (name, diff name program None)
          | _ ->
              failwith "invalid 'examples.csv' format")
 
