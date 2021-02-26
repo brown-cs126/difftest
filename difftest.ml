@@ -7,7 +7,7 @@ type diffresult =
   { program: string
   ; expected: (string, string) result option
   ; interpreter: (string, string) result
-  ; compiler: (string, Assemble.error_code * string) result }
+  ; compiler: (string, Assemble.error) result }
 
 type partial_success = {interpreter_agrees: bool; compiler_agrees: bool}
 
@@ -32,10 +32,7 @@ let display_diffresult {program; expected; interpreter; compiler} : string =
   and compiler =
     Result.map_error
       (function
-        | Assemble.Expected, error ->
-            error
-        | Assemble.Unexpected code, error ->
-            sprintf "Exited with code %d: %s" code error)
+        | Assemble.Expected error -> error | Assemble.Unexpected error -> error)
       compiler
   in
   let expected =
@@ -57,9 +54,9 @@ let compiler_output_matches expected actual =
   match (expected, actual) with
   | Ok expected, Ok actual ->
       String.equal expected actual
-  | Error _, Error (Assemble.Expected, _) ->
+  | Error _, Error (Assemble.Expected _) ->
       true
-  | Error _, Error (Assemble.Unexpected _, _) ->
+  | Error _, Error (Assemble.Unexpected _) ->
       false
   | Ok _, Error _ | Error _, Ok _ ->
       false
@@ -99,7 +96,7 @@ let diff program expected =
     | Ok instrs ->
         Assemble.eval "test_output" Runtime.runtime "test" [] instrs
     | Error err ->
-        Error (Assemble.Expected, err)
+        Error (Assemble.Expected err)
   in
   result_of_diffresult {program; expected; interpreter; compiler}
 
