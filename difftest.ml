@@ -80,7 +80,7 @@ let result_of_diffresult diffresult =
   let summary = display_diffresult diffresult in
   if ok then Ok summary else Error (summary, partial_success)
 
-let diff name program expected =
+let diff name program input expected =
   let ast =
     try Ok (S_exp.parse program) with e -> Error (Printexc.to_string e)
   in
@@ -89,12 +89,12 @@ let diff name program expected =
         try f arg with e -> Error (Printexc.to_string e))
   in
   let try_map f = try_bind (fun arg -> Ok (f arg)) in
-  let interpreter = try_map Interp.interp ast
+  let interpreter = try_map (fun e -> Interp.interp_io e input) ast
   and compiler =
     try_map Compile.compile ast
     |> function
     | Ok instrs ->
-        Assemble.eval "test_output" Runtime.runtime name [] instrs
+        Assemble.eval_input "test_output" Runtime.runtime name [] instrs input
     | Error err ->
         Error (Assemble.Expected err)
   in
@@ -125,7 +125,9 @@ let diff_file path =
     | true, true ->
         failwith (sprintf "Expected output and error for test: %s" filename)
   in
-  diff filename (read_file path) expected
+  let in_file = Filename.remove_extension path ^ ".in" in
+  let input = if Sys.file_exists in_file then read_file in_file else "" in
+  diff filename (read_file path) input expected
 
 let csv_results =
   (try read_file "../examples/examples.csv" with _ -> "")
@@ -136,10 +138,12 @@ let csv_results =
   |> List.mapi (fun i ->
          let name = sprintf "anonymous-%s" (string_of_int i) in
          function
+         | [program; input; expected] ->
+             (name, diff name program input (Some (Ok expected)))
          | [program; expected] ->
-             (name, diff name program (Some (Ok expected)))
+             (name, diff name program "" (Some (Ok expected)))
          | [program] ->
-             (name, diff name program None)
+             (name, diff name program "" None)
          | _ ->
              failwith "invalid 'examples.csv' format")
 

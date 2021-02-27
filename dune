@@ -10,6 +10,7 @@
   (glob_files ../examples/examples.csv)
   (glob_files ../examples/*.lisp)
   (glob_files ../examples/*.out)
-  (glob_files ../examples/*.err))
+  (glob_files ../examples/*.err)
+  (glob_files ../examples/*.in))
  (action
   (run ./difftest.exe)))
