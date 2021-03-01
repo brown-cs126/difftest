@@ -136,16 +136,29 @@ let csv_results =
   |> List.map (String.split_on_char ',')
   |> List.map (List.map String.trim)
   |> List.mapi (fun i ->
-         let name = sprintf "anonymous-%s" (string_of_int i) in
+         let name = sprintf "anonymous-%d" i in
          function
-         | [program; input; expected] ->
-             (name, diff name program input (Some (Ok expected)))
-         | [program; expected] ->
-             (name, diff name program "" (Some (Ok expected)))
          | [program] ->
-             (name, diff name program "" None)
+             [(name, diff name program "" None)]
+         | [program; expected] ->
+             [(name, diff name program "" (Some (Ok expected)))]
+         | [program; input; expected] ->
+             [(name, diff name program input (Some (Ok expected)))]
+         | program :: pairs ->
+             let rec diff_multiple i = function
+               | [] ->
+                   []
+               | input :: expected :: rest ->
+                   let name = sprintf "%s-%d" name i in
+                   let result = diff name program input (Some (Ok expected)) in
+                   (name, result) :: diff_multiple (i + 1) rest
+               | _ ->
+                   failwith "invalid 'examples.csv' format"
+             in
+             diff_multiple 0 pairs
          | _ ->
              failwith "invalid 'examples.csv' format")
+  |> List.concat
 
 let file_results =
   Sys.readdir "../examples" |> Array.to_list
