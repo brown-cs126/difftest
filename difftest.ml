@@ -11,6 +11,18 @@ type diffresult =
 
 type partial_success = {interpreter_agrees: bool; compiler_agrees: bool}
 
+let wipe_tmp () =
+  let tmpdir = "/tmp/csci1260" in
+  let rec rmrf path =
+    if Sys.is_directory path then (
+      Sys.readdir path
+      |> Array.iter (fun name -> rmrf (Filename.concat path name)) ;
+      Unix.rmdir path )
+    else Sys.remove path
+  in
+  if Sys.file_exists tmpdir then rmrf tmpdir else () ;
+  Unix.mkdir tmpdir 0o777
+
 let indent s =
   String.split_on_char '\n' s
   |> List.map (fun s -> "\t" ^ s)
@@ -89,8 +101,11 @@ let diff name program input expected =
         try f arg with e -> Error (Printexc.to_string e))
   in
   let try_map f = try_bind (fun arg -> Ok (f arg)) in
-  let interpreter = try_map (fun e -> Interp.interp_io e input) ast
+  let interpreter =
+    wipe_tmp () ;
+    try_map (fun e -> Interp.interp_io e input) ast
   and compiler =
+    wipe_tmp () ;
     try_map Compile.compile ast
     |> function
     | Ok instrs ->
@@ -98,6 +113,7 @@ let diff name program input expected =
     | Error err ->
         Error (Assemble.Expected err)
   in
+  wipe_tmp () ;
   result_of_diffresult {program; expected; interpreter; compiler}
 
 let read_file file =
