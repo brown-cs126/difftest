@@ -156,8 +156,12 @@ let csv_results =
          function
          | [program] ->
              [(name, diff name program "" None)]
+         | [program; (("error" | "ERROR") as error)] ->
+             [(name, diff name program "" (Some (Error error)))]
          | [program; expected] ->
              [(name, diff name program "" (Some (Ok expected)))]
+         | [program; input; (("error" | "ERROR") as error)] ->
+             [(name, diff name program input (Some (Error error)))]
          | [program; input; expected] ->
              [(name, diff name program input (Some (Ok expected)))]
          | program :: pairs ->
@@ -165,8 +169,15 @@ let csv_results =
                | [] ->
                    []
                | input :: expected :: rest ->
-                   let name = sprintf "%s-%d" name i in
-                   let result = diff name program input (Some (Ok expected)) in
+                   let name = sprintf "%s-%d" name i
+                   and expected =
+                     match expected with
+                     | ("error" | "ERROR") as error ->
+                         Error error
+                     | output ->
+                         Ok output
+                   in
+                   let result = diff name program input (Some expected) in
                    (name, result) :: diff_multiple (i + 1) rest
                | _ ->
                    failwith "invalid 'examples.csv' format"
