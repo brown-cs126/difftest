@@ -11,6 +11,18 @@ type diffresult =
 
 type partial_success = {interpreter_agrees: bool; compiler_agrees: bool}
 
+let wipe_tmp () =
+  let tmpdir = "/tmp/csci1260" in
+  let rec rmrf path =
+    if Sys.is_directory path then (
+      Sys.readdir path
+      |> Array.iter (fun name -> rmrf (Filename.concat path name)) ;
+      Unix.rmdir path )
+    else Sys.remove path
+  in
+  if Sys.file_exists tmpdir then rmrf tmpdir else () ;
+  Unix.mkdir tmpdir 0o777
+
 let indent s =
   String.split_on_char '\n' s
   |> List.map (fun s -> "\t" ^ s)
@@ -80,7 +92,7 @@ let result_of_diffresult diffresult =
   let summary = display_diffresult diffresult in
   if ok then Ok summary else Error (summary, partial_success)
 
-let diff name program expected =
+let diff name program input expected =
   let ast =
     try Ok (S_exp.parse program) with e -> Error (Printexc.to_string e)
   in
@@ -89,15 +101,19 @@ let diff name program expected =
         try f arg with e -> Error (Printexc.to_string e))
   in
   let try_map f = try_bind (fun arg -> Ok (f arg)) in
-  let interpreter = try_map Interp.interp ast
+  let interpreter =
+    wipe_tmp () ;
+    try_map (fun e -> Interp.interp_io e input) ast
   and compiler =
+    wipe_tmp () ;
     try_map Compile.compile ast
     |> function
     | Ok instrs ->
-        Assemble.eval "test_output" Runtime.runtime name [] instrs
+        Assemble.eval_input "test_output" Runtime.runtime name [] instrs input
     | Error err ->
         Error (Assemble.Expected err)
   in
+  wipe_tmp () ;
   result_of_diffresult {program; expected; interpreter; compiler}
 
 let read_file file =
@@ -125,7 +141,9 @@ let diff_file path =
     | true, true ->
         failwith (sprintf "Expected output and error for test: %s" filename)
   in
-  diff filename (read_file path) expected
+  let in_file = Filename.remove_extension path ^ ".in" in
+  let input = if Sys.file_exists in_file then read_file in_file else "" in
+  diff filename (read_file path) input expected
 
 let csv_results =
   (try read_file "../examples/examples.csv" with _ -> "")
@@ -134,14 +152,29 @@ let csv_results =
   |> List.map (String.split_on_char ',')
   |> List.map (List.map String.trim)
   |> List.mapi (fun i ->
-         let name = sprintf "anonymous-%s" (string_of_int i) in
+         let name = sprintf "anonymous-%d" i in
          function
-         | [program; expected] ->
-             (name, diff name program (Some (Ok expected)))
          | [program] ->
-             (name, diff name program None)
+             [(name, diff name program "" None)]
+         | [program; expected] ->
+             [(name, diff name program "" (Some (Ok expected)))]
+         | [program; input; expected] ->
+             [(name, diff name program input (Some (Ok expected)))]
+         | program :: pairs ->
+             let rec diff_multiple i = function
+               | [] ->
+                   []
+               | input :: expected :: rest ->
+                   let name = sprintf "%s-%d" name i in
+                   let result = diff name program input (Some (Ok expected)) in
+                   (name, result) :: diff_multiple (i + 1) rest
+               | _ ->
+                   failwith "invalid 'examples.csv' format"
+             in
+             diff_multiple 0 pairs
          | _ ->
              failwith "invalid 'examples.csv' format")
+  |> List.concat
 
 let file_results =
   Sys.readdir "../examples" |> Array.to_list
