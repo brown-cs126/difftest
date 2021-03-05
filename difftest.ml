@@ -93,8 +93,8 @@ let result_of_diffresult diffresult =
   if ok then Ok summary else Error (summary, partial_success)
 
 let diff name program input expected =
-  let ast =
-    try Ok (S_exp.parse program) with e -> Error (Printexc.to_string e)
+  let exps =
+    try Ok (S_exp.parse_many program) with e -> Error (Printexc.to_string e)
   in
   let try_bind f arg =
     Result.bind arg (fun arg ->
@@ -103,10 +103,10 @@ let diff name program input expected =
   let try_map f = try_bind (fun arg -> Ok (f arg)) in
   let interpreter =
     wipe_tmp () ;
-    try_map (fun e -> Interp.interp_io e input) ast
+    try_map (fun e -> Interp.interp_io e input) exps
   and compiler =
     wipe_tmp () ;
-    try_map Compile.compile ast
+    try_map Compile.compile exps
     |> function
     | Ok instrs ->
         Assemble.eval_input "test_output" Runtime.runtime name [] instrs input
