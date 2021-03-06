@@ -7,6 +7,7 @@
  (alias runtest)
  (deps
   difftest.exe
+  (glob_files ../data/*)
   (glob_files ../examples/examples.csv)
   (glob_files ../examples/*.lisp)
   (glob_files ../examples/*.out)
