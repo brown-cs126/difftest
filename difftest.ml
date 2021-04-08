@@ -108,7 +108,7 @@ let diff is_mlb name program input expected =
     try_map (fun e -> Interp.interp_io e input) ast
   and compiler =
     wipe_tmp () ;
-    try_map Compile.compile ast
+    try_map (fun ast -> Optimize.optimize ast None |> Compile.compile) ast
     |> function
     | Ok instrs ->
         Assemble.eval_input "test_output" Runtime.runtime name [] instrs input
