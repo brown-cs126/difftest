@@ -1,7 +1,7 @@
 (executable
  (name difftest)
  (modules difftest)
- (libraries yojson csci1260))
+ (libraries yojson csci1260 ast mlb_syntax lisp_syntax))
 
 (rule
  (alias runtest)
@@ -9,7 +9,9 @@
   difftest.exe
   (glob_files ../data/*)
   (glob_files ../examples/examples.csv)
+  (glob_files ../examples/mlb-examples.tsv)
   (glob_files ../examples/*.lisp)
+  (glob_files ../examples/*.mlb)
   (glob_files ../examples/*.out)
   (glob_files ../examples/*.err)
   (glob_files ../examples/*.in))

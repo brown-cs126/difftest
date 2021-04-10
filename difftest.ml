@@ -92,9 +92,11 @@ let result_of_diffresult diffresult =
   let summary = display_diffresult diffresult in
   if ok then Ok summary else Error (summary, partial_success)
 
-let diff name program input expected =
-  let exps =
-    try Ok (S_exp.parse_many program) with e -> Error (Printexc.to_string e)
+let diff is_mlb name program input expected =
+  let ast =
+    try
+      Ok (if is_mlb then Mlb_syntax.parse program else Lisp_syntax.parse program)
+    with e -> Error (Printexc.to_string e)
   in
   let try_bind f arg =
     Result.bind arg (fun arg ->
@@ -103,10 +105,10 @@ let diff name program input expected =
   let try_map f = try_bind (fun arg -> Ok (f arg)) in
   let interpreter =
     wipe_tmp () ;
-    try_map (fun e -> Interp.interp_io e input) exps
+    try_map (fun e -> Interp.interp_io e input) ast
   and compiler =
     wipe_tmp () ;
-    try_map Compile.compile exps
+    try_map (fun ast -> Optimize.optimize ast None |> Compile.compile) ast
     |> function
     | Ok instrs ->
         Assemble.eval_input "test_output" Runtime.runtime name [] instrs input
@@ -123,6 +125,7 @@ let read_file file =
 
 let diff_file path =
   let filename = Filename.basename path in
+  let extension = Filename.extension filename in
   let expected =
     let name = Filename.remove_extension path in
     let out_file = name ^ ".out" and err_file = name ^ ".err" in
@@ -143,7 +146,7 @@ let diff_file path =
   in
   let in_file = Filename.remove_extension path ^ ".in" in
   let input = if Sys.file_exists in_file then read_file in_file else "" in
-  diff filename (read_file path) input expected
+  diff (extension = ".mlb") filename (read_file path) input expected
 
 let csv_results =
   (try read_file "../examples/examples.csv" with _ -> "")
@@ -155,15 +158,15 @@ let csv_results =
          let name = sprintf "anonymous-%d" i in
          function
          | [program] ->
-             [(name, diff name program "" None)]
+             [(name, diff false name program "" None)]
          | [program; (("error" | "ERROR") as error)] ->
-             [(name, diff name program "" (Some (Error error)))]
+             [(name, diff false name program "" (Some (Error error)))]
          | [program; expected] ->
-             [(name, diff name program "" (Some (Ok expected)))]
+             [(name, diff false name program "" (Some (Ok expected)))]
          | [program; input; (("error" | "ERROR") as error)] ->
-             [(name, diff name program input (Some (Error error)))]
+             [(name, diff false name program input (Some (Error error)))]
          | [program; input; expected] ->
-             [(name, diff name program input (Some (Ok expected)))]
+             [(name, diff false name program input (Some (Ok expected)))]
          | program :: pairs ->
              let rec diff_multiple i = function
                | [] ->
@@ -177,7 +180,7 @@ let csv_results =
                      | output ->
                          Ok output
                    in
-                   let result = diff name program input (Some expected) in
+                   let result = diff false name program input (Some expected) in
                    (name, result) :: diff_multiple (i + 1) rest
                | _ ->
                    failwith "invalid 'examples.csv' format"
@@ -187,13 +190,56 @@ let csv_results =
              failwith "invalid 'examples.csv' format")
   |> List.concat
 
+let mlb_tsv_results =
+  (try read_file "../examples/mlb-examples.tsv" with _ -> "")
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.length line != 0)
+  |> List.map (String.split_on_char '\t')
+  |> List.map (List.map String.trim)
+  |> List.mapi (fun i ->
+         let name = sprintf "anonymous-%d" i in
+         function
+         | [program] ->
+             [(name, diff true name program "" None)]
+         | [program; (("error" | "ERROR") as error)] ->
+             [(name, diff true name program "" (Some (Error error)))]
+         | [program; expected] ->
+             [(name, diff true name program "" (Some (Ok expected)))]
+         | [program; input; (("error" | "ERROR") as error)] ->
+             [(name, diff true name program input (Some (Error error)))]
+         | [program; input; expected] ->
+             [(name, diff true name program input (Some (Ok expected)))]
+         | program :: pairs ->
+             let rec diff_multiple i = function
+               | [] ->
+                   []
+               | input :: expected :: rest ->
+                   let name = sprintf "%s-%d" name i
+                   and expected =
+                     match expected with
+                     | ("error" | "ERROR") as error ->
+                         Error error
+                     | output ->
+                         Ok output
+                   in
+                   let result = diff true name program input (Some expected) in
+                   (name, result) :: diff_multiple (i + 1) rest
+               | _ ->
+                   failwith "invalid 'mlb-examples.tsv' format"
+             in
+             diff_multiple 0 pairs
+         | _ ->
+             failwith "invalid 'mlb-examples.tsv' format")
+  |> List.concat
+
 let file_results =
   Sys.readdir "../examples" |> Array.to_list
-  |> List.filter (fun file -> Filename.check_suffix file ".lisp")
+  |> List.filter (fun file ->
+         Filename.check_suffix file ".lisp" || Filename.check_suffix file ".mlb")
   |> List.map (sprintf "examples/%s")
   |> List.map (fun f -> (f, diff_file (sprintf "../%s" f)))
 
-let results = file_results @ csv_results
+let results = file_results @ csv_results @ mlb_tsv_results
 
 let difftest () =
   printf "TESTING\n" ;
